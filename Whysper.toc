@@ -1,0 +1,9 @@
+## Interface: 120007
+## Title: Whysper
+## Notes: Configurable whisper filter for friends, guildies, party, raid, and strangers.
+## Author: Noriel Sylvire
+## Version: 1.2
+## IconTexture: Interface\Icons\Inv_misc_note_03
+## SavedVariables: WhysperConfig
+
+core.lua
