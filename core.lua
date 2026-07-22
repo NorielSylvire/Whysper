@@ -6,7 +6,7 @@ WhysperConfig = WhysperConfig or {}
 local frame = CreateFrame("Frame")
 local guildMembers = {}
 local replyCooldowns = {}
-local recentBlockedWhispers = {} -- Tracks recently blocked senders for the TTS failsafe
+local recentBlockedWhispers = {} -- Tracks recently blocked senders AND their message payloads
 local recentAutoReplies = {}     -- Tracks automated outgoing whispers to hide them
 
 -- Rebuild the local guild cache whenever the roster updates
@@ -55,21 +55,34 @@ end
 
 -- Safely hook the TTS system across all modern API execution paths
 local function HookTTS()
+    -- Central logic to determine if an event should be muted
+    local function IsTTSBlocked(event, msg, sender, guid)
+        if event == "CHAT_MSG_WHISPER" then
+            local myName = UnitName("player")
+            local senderShort = string.match(sender, "(.*)-") or sender
+            if sender ~= myName and senderShort ~= myName then
+                return ShouldBlockWhisper(sender, guid)
+            end
+        elseif event == "CHAT_MSG_WHISPER_INFORM" then
+            if WhysperConfig.hideAutoReply then
+                local timeSent = recentAutoReplies[sender] -- arg2 is the target we whispered
+                if timeSent and (GetTime() - timeSent < 2) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
     -- 1. Mixin/Table Function Hook (Modern WoW 10.0+)
     if TextToSpeechFrame and TextToSpeechFrame.OnEvent and not TextToSpeechFrame.WhysperMixinHooked then
         TextToSpeechFrame.WhysperMixinHooked = true
         local origOnEvent = TextToSpeechFrame.OnEvent
         TextToSpeechFrame.OnEvent = function(self, event, ...)
-            if event == "CHAT_MSG_WHISPER" then
+            if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_WHISPER_INFORM" then
                 local msg, sender, _, _, _, flags, _, _, _, _, _, guid = ...
                 if flags ~= "GM" and flags ~= "DEV" then
-                    local myName = UnitName("player")
-                    local senderShort = string.match(sender, "(.*)-") or sender
-                    if sender ~= myName and senderShort ~= myName then
-                        if ShouldBlockWhisper(sender, guid) then
-                            return -- Block it at the Mixin level
-                        end
-                    end
+                    if IsTTSBlocked(event, msg, sender, guid) then return end
                 end
             end
             return origOnEvent(self, event, ...)
@@ -82,16 +95,10 @@ local function HookTTS()
         local origScript = TextToSpeechFrame:GetScript("OnEvent")
         if origScript then
             TextToSpeechFrame:SetScript("OnEvent", function(self, event, ...)
-                if event == "CHAT_MSG_WHISPER" then
+                if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_WHISPER_INFORM" then
                     local msg, sender, _, _, _, flags, _, _, _, _, _, guid = ...
                     if flags ~= "GM" and flags ~= "DEV" then
-                        local myName = UnitName("player")
-                        local senderShort = string.match(sender, "(.*)-") or sender
-                        if sender ~= myName and senderShort ~= myName then
-                            if ShouldBlockWhisper(sender, guid) then
-                                return -- Block it at the Frame level
-                            end
-                        end
+                        if IsTTSBlocked(event, msg, sender, guid) then return end
                     end
                 end
                 return origScript(self, event, ...)
@@ -107,16 +114,29 @@ local function HookTTS()
             if text then
                 local now = GetTime()
                 local block = false
-                for blockedSender, timeBlocked in pairs(recentBlockedWhispers) do
-                    -- Clean up old entries
-                    if now - timeBlocked > 2 then
+
+                -- Failsafe 1: Check against incoming blocked whispers (matching name OR exact message text)
+                for blockedSender, data in pairs(recentBlockedWhispers) do
+                    if now - data.time > 2 then
                         recentBlockedWhispers[blockedSender] = nil
-                    elseif string.find(text, blockedSender, 1, true) then
+                    else
+                        if string.find(text, blockedSender, 1, true) or (data.msg and string.find(text, data.msg, 1, true)) then
+                            block = true
+                        end
+                    end
+                end
+
+                -- Failsafe 2: Check against outgoing auto-replies getting read aloud
+                if WhysperConfig.hideAutoReply then
+                    local customMsg = WhysperConfig.ignoredMessageText or "You are currently being ignored by the user."
+                    if customMsg:match("^%s*$") then customMsg = "You are currently being ignored by the user." end
+                    if string.find(text, customMsg, 1, true) then
                         block = true
                     end
                 end
+
                 if block then
-                    return -- Silently drop the TTS playback
+                    return -- Silently drop the TTS playback entirely
                 end
             end
             return origSpeakText(voiceID, text, ...)
@@ -162,8 +182,10 @@ local function FilterIncomingWhispers(self, event, msg, sender, language, channe
 
     if ShouldBlockWhisper(sender, guid) then
         local now = GetTime()
-        recentBlockedWhispers[sender] = now
-        recentBlockedWhispers[senderShort] = now
+        -- Store both the sender AND the message so our C-level TTS failsafe catches it
+        -- even if the user has "Read sender names" disabled in TTS settings.
+        recentBlockedWhispers[sender] = { time = now, msg = msg }
+        recentBlockedWhispers[senderShort] = { time = now, msg = msg }
 
         if WhysperConfig.sendIgnoredMessage then
             if not replyCooldowns[sender] or (now - replyCooldowns[sender] > 10) then
@@ -264,7 +286,6 @@ end)
 
 -- Checkbox to hide the auto-reply from the user's own chat
 local cbHideReply = CreateCheckbox("Hide auto-reply from my chat window (prevents tab opening)", -15, "hideAutoReply", nil)
--- Custom anchor for cbHideReply so it sits cleanly below the text box
 cbHideReply:SetPoint("TOPLEFT", replyEditBox, "BOTTOMLEFT", -15, -15)
 
 -- Visually toggle the EditBox and Hide Checkbox based on the Auto-Reply status
