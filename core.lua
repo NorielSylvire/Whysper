@@ -1,15 +1,21 @@
+-- Whysper core.lua for WoW Retail 12.0.7
+-- Updated to fully suppress blocked whispers, prevent TTS from triggering,
+-- hide outgoing auto-replies, and prevent whisper tabs/conversations from opening.
+
 local addonName, _ = ...
 
--- Global table for SavedVariables
 WhysperConfig = WhysperConfig or {}
 
 local frame = CreateFrame("Frame")
 local guildMembers = {}
 local replyCooldowns = {}
-local recentBlockedWhispers = {} -- Tracks recently blocked senders AND their message payloads
-local recentAutoReplies = {}     -- Tracks automated outgoing whispers to hide them
+local recentAutoReplies = {}
+local suppressConversations = {}
 
--- Rebuild the local guild cache whenever the roster updates
+local function NormalizeName(name)
+    return name and (string.match(name, "(.*)%-") or name) or nil
+end
+
 local function UpdateGuildRoster()
     wipe(guildMembers)
     if IsInGuild() then
@@ -17,7 +23,7 @@ local function UpdateGuildRoster()
             local name = GetGuildRosterInfo(i)
             if name then
                 guildMembers[name] = true
-                local shortName = string.match(name, "(.*)-")
+                local shortName = NormalizeName(name)
                 if shortName then
                     guildMembers[shortName] = true
                 end
@@ -26,128 +32,203 @@ local function UpdateGuildRoster()
     end
 end
 
--- Determine the most specific category for the sender
 local function GetSenderCategory(sender, guid)
     if guid then
-        if C_FriendList.IsFriend(guid) then return "friend" end
-        local bnetInfo = C_BattleNet.GetAccountInfoByGUID(guid)
-        if bnetInfo and bnetInfo.isFriend then return "friend" end
+        if C_FriendList and C_FriendList.IsFriend and C_FriendList.IsFriend(guid) then
+            return "friend"
+        end
+
+        if C_BattleNet and C_BattleNet.GetAccountInfoByGUID then
+            local bnetInfo = C_BattleNet.GetAccountInfoByGUID(guid)
+            if bnetInfo and bnetInfo.isFriend then
+                return "friend"
+            end
+        end
     end
 
-    local senderShort = string.match(sender, "(.*)-") or sender
-    if guildMembers[sender] or guildMembers[senderShort] then return "guildie" end
-    if UnitInRaid(sender) or UnitInRaid(senderShort) then return "raid" end
-    if UnitInParty(sender) or UnitInParty(senderShort) then return "party" end
+    local senderShort = NormalizeName(sender)
+
+    if guildMembers[sender] or guildMembers[senderShort] then
+        return "guildie"
+    end
+
+    if UnitInRaid(sender) or UnitInRaid(senderShort) then
+        return "raid"
+    end
+
+    if UnitInParty(sender) or UnitInParty(senderShort) then
+        return "party"
+    end
 
     return "stranger"
 end
 
--- Centralized logic to check if a whisper should be blocked
 local function ShouldBlockWhisper(sender, guid)
     local category = GetSenderCategory(sender, guid)
-    if category == "friend" then return not WhysperConfig.allowFriends end
-    if category == "guildie" then return not WhysperConfig.allowGuildies end
-    if category == "raid" then return not WhysperConfig.allowRaid end
-    if category == "party" then return not WhysperConfig.allowParty end
-    if category == "stranger" then return not WhysperConfig.allowStrangers end
+
+    if category == "friend" then
+        return not WhysperConfig.allowFriends
+    elseif category == "guildie" then
+        return not WhysperConfig.allowGuildies
+    elseif category == "raid" then
+        return not WhysperConfig.allowRaid
+    elseif category == "party" then
+        return not WhysperConfig.allowParty
+    elseif category == "stranger" then
+        return not WhysperConfig.allowStrangers
+    end
+
     return false
 end
 
--- Safely hook the TTS system across all modern API execution paths
-local function HookTTS()
-    -- Central logic to determine if an event should be muted
-    local function IsTTSBlocked(event, msg, sender, guid)
-        if event == "CHAT_MSG_WHISPER" then
-            local myName = UnitName("player")
-            local senderShort = string.match(sender, "(.*)-") or sender
-            if sender ~= myName and senderShort ~= myName then
-                return ShouldBlockWhisper(sender, guid)
-            end
-        elseif event == "CHAT_MSG_WHISPER_INFORM" then
-            if WhysperConfig.hideAutoReply then
-                local timeSent = recentAutoReplies[sender] -- arg2 is the target we whispered
-                if timeSent and (GetTime() - timeSent < 2) then
-                    return true
-                end
-            end
-        end
-        return false
+-- =========================================================
+-- HARD WHISPER UI SUPPRESSION
+-- =========================================================
+
+local function CloseWhisperUI(name)
+    if not name then return end
+
+    local short = NormalizeName(name)
+    suppressConversations[short] = GetTime() + 5
+
+    -- Modern retail conversation API
+    if C_ChatInfo and C_ChatInfo.CloseChatConversation then
+        pcall(C_ChatInfo.CloseChatConversation, short)
+        pcall(C_ChatInfo.CloseChatConversation, name)
     end
 
-    -- 1. Mixin/Table Function Hook (Modern WoW 10.0+)
-    if TextToSpeechFrame and TextToSpeechFrame.OnEvent and not TextToSpeechFrame.WhysperMixinHooked then
-        TextToSpeechFrame.WhysperMixinHooked = true
-        local origOnEvent = TextToSpeechFrame.OnEvent
-        TextToSpeechFrame.OnEvent = function(self, event, ...)
-            if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_WHISPER_INFORM" then
-                local msg, sender, _, _, _, flags, _, _, _, _, _, guid = ...
-                if flags ~= "GM" and flags ~= "DEV" then
-                    if IsTTSBlocked(event, msg, sender, guid) then return end
+    -- Close any temporary whisper tabs that may have been created
+    if FCF_Close then
+        for i = 1, NUM_CHAT_WINDOWS do
+            local chatFrame = _G["ChatFrame"..i]
+            if chatFrame and chatFrame.isTemporary then
+                local target = chatFrame.whisperTarget or chatFrame.tellTarget
+                if target and NormalizeName(target) == short then
+                    pcall(FCF_Close, chatFrame)
                 end
             end
-            return origOnEvent(self, event, ...)
-        end
-    end
-
-    -- 2. Frame Script Hook (Legacy fallback)
-    if TextToSpeechFrame and not TextToSpeechFrame.WhysperScriptHooked then
-        TextToSpeechFrame.WhysperScriptHooked = true
-        local origScript = TextToSpeechFrame:GetScript("OnEvent")
-        if origScript then
-            TextToSpeechFrame:SetScript("OnEvent", function(self, event, ...)
-                if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_WHISPER_INFORM" then
-                    local msg, sender, _, _, _, flags, _, _, _, _, _, guid = ...
-                    if flags ~= "GM" and flags ~= "DEV" then
-                        if IsTTSBlocked(event, msg, sender, guid) then return end
-                    end
-                end
-                return origScript(self, event, ...)
-            end)
-        end
-    end
-
-    -- 3. C_VoiceChat API Hook (Absolute failsafe for EventRegistry / unpredictable routing)
-    if C_VoiceChat and C_VoiceChat.SpeakText and not C_VoiceChat.WhysperHooked then
-        C_VoiceChat.WhysperHooked = true
-        local origSpeakText = C_VoiceChat.SpeakText
-        C_VoiceChat.SpeakText = function(voiceID, text, ...)
-            if text then
-                local now = GetTime()
-                local block = false
-
-                -- Failsafe 1: Check against incoming blocked whispers (matching name OR exact message text)
-                for blockedSender, data in pairs(recentBlockedWhispers) do
-                    if now - data.time > 2 then
-                        recentBlockedWhispers[blockedSender] = nil
-                    else
-                        if string.find(text, blockedSender, 1, true) or (data.msg and string.find(text, data.msg, 1, true)) then
-                            block = true
-                        end
-                    end
-                end
-
-                -- Failsafe 2: Check against outgoing auto-replies getting read aloud
-                if WhysperConfig.hideAutoReply then
-                    local customMsg = WhysperConfig.ignoredMessageText or "You are currently being ignored by the user."
-                    if customMsg:match("^%s*$") then customMsg = "You are currently being ignored by the user." end
-                    if string.find(text, customMsg, 1, true) then
-                        block = true
-                    end
-                end
-
-                if block then
-                    return -- Silently drop the TTS playback entirely
-                end
-            end
-            return origSpeakText(voiceID, text, ...)
         end
     end
 end
 
--- Initialize default settings on load
+-- =========================================================
+-- TTS AND WHISPER TAB PREVENTION
+-- =========================================================
+-- We hook into key UI systems to block events at the source.
+-- Message filters alone only hide chat text; TTS and the floating
+-- chat frame manager process events independently.
+
+local function ShouldBlockIncomingMessage(sender, flags, guid)
+    -- Never block GMs or developers
+    if flags == "GM" or flags == "DEV" then
+        return false
+    end
+
+    local myName = UnitName("player")
+    local senderShort = NormalizeName(sender)
+
+    -- Don't block our own messages
+    if sender == myName or senderShort == myName then
+        return false
+    end
+
+    return ShouldBlockWhisper(sender, guid)
+end
+
+local function ShouldBlockOutgoingMessage(target)
+    if not WhysperConfig.hideAutoReply then
+        return false
+    end
+
+    local short = NormalizeName(target)
+    local sent = recentAutoReplies[short]
+
+    return sent and (GetTime() - sent) < 5
+end
+
+local function InstallTTSHook()
+    if WhysperTTSHookInstalled then return end
+    WhysperTTSHookInstalled = true
+
+    -- The key insight: TTS for chat messages is NOT triggered by TextToSpeechFrame's
+    -- OnEvent handler. Instead, ChatFrameMixin:MessageEventHandler calls
+    -- TextToSpeechFrame_MessageEventHandler BEFORE message filters run.
+    -- We must hook that global function to intercept TTS.
+
+    if TextToSpeechFrame_MessageEventHandler then
+        local originalTTSHandler = TextToSpeechFrame_MessageEventHandler
+        TextToSpeechFrame_MessageEventHandler = function(frame, event, ...)
+            if event == "CHAT_MSG_WHISPER" then
+                local _, sender, _, _, _, flags, _, _, _, _, _, guid = ...
+                if ShouldBlockIncomingMessage(sender, flags, guid) then
+                    return -- Block TTS for this message
+                end
+            elseif event == "CHAT_MSG_WHISPER_INFORM" then
+                local _, target = ...
+                if ShouldBlockOutgoingMessage(target) then
+                    return -- Block TTS for our auto-reply
+                end
+            end
+            return originalTTSHandler(frame, event, ...)
+        end
+    end
+end
+
+local function InstallFloatingChatFrameManagerHook()
+    if WhysperFCFManagerHookInstalled then return end
+    WhysperFCFManagerHookInstalled = true
+
+    -- Hook the FloatingChatFrameManager to prevent whisper tabs from opening
+    if FloatingChatFrameManager then
+        local originalOnEvent = FloatingChatFrameManager:GetScript("OnEvent")
+        if originalOnEvent then
+            FloatingChatFrameManager:SetScript("OnEvent", function(self, event, ...)
+                if event == "CHAT_MSG_WHISPER" then
+                    local _, sender, _, _, _, flags, _, _, _, _, _, guid = ...
+                    if ShouldBlockIncomingMessage(sender, flags, guid) then
+                        return -- Don't open a whisper tab
+                    end
+                elseif event == "CHAT_MSG_WHISPER_INFORM" then
+                    local _, target = ...
+                    if ShouldBlockOutgoingMessage(target) then
+                        return -- Don't open a whisper tab for our auto-reply
+                    end
+                end
+                return originalOnEvent(self, event, ...)
+            end)
+        end
+    end
+end
+
+local function InstallTemporaryWindowHook()
+    if WhysperTempWindowHookInstalled then return end
+    WhysperTempWindowHookInstalled = true
+
+    -- Also hook FCF_OpenTemporaryWindow as a safety net
+    if FCF_OpenTemporaryWindow then
+        hooksecurefunc("FCF_OpenTemporaryWindow", function(chatType, target)
+            if chatType == "WHISPER" and target then
+                local short = NormalizeName(target)
+                local untilTime = suppressConversations[short]
+                if untilTime and untilTime > GetTime() then
+                    -- Close it immediately on next frame
+                    C_Timer.After(0, function()
+                        CloseWhisperUI(target)
+                    end)
+                end
+            end
+        end)
+    end
+end
+
+-- =========================================================
+-- EVENT SETUP
+-- =========================================================
+
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("GUILD_ROSTER_UPDATE")
+
 frame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
         local defaults = {
@@ -158,74 +239,106 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             allowStrangers = false,
             sendIgnoredMessage = false,
             ignoredMessageText = "You are currently being ignored by the user.",
-            hideAutoReply = false
+            hideAutoReply = false,
         }
+
         for k, v in pairs(defaults) do
             if WhysperConfig[k] == nil then
                 WhysperConfig[k] = v
             end
         end
+
     elseif event == "PLAYER_LOGIN" then
-        if IsInGuild() then C_GuildInfo.GuildRoster() end
-        HookTTS() -- Inject the TTS hooks once UI is fully available
+        if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then
+            C_GuildInfo.GuildRoster()
+        end
+
+        -- Install hooks to block TTS and whisper tabs
+        InstallTTSHook()
+        InstallFloatingChatFrameManagerHook()
+        InstallTemporaryWindowHook()
+
     elseif event == "GUILD_ROSTER_UPDATE" then
         UpdateGuildRoster()
     end
 end)
 
--- The whisper filter hook for the ChatFrame
-local function FilterIncomingWhispers(self, event, msg, sender, language, channelString, target, flags, zoneID, channelNumber, channelName, unused, lineID, guid)
-    if flags == "GM" or flags == "DEV" then return false end
-    local myName = UnitName("player")
-    local senderShort = string.match(sender, "(.*)-") or sender
-    if sender == myName or senderShort == myName then return false end
+-- =========================================================
+-- MESSAGE FILTERS (for hiding text in chat frames)
+-- =========================================================
+-- These filters hide messages from chat frames.
 
-    if ShouldBlockWhisper(sender, guid) then
-        local now = GetTime()
-        -- Store both the sender AND the message so our C-level TTS failsafe catches it
-        -- even if the user has "Read sender names" disabled in TTS settings.
-        recentBlockedWhispers[sender] = { time = now, msg = msg }
-        recentBlockedWhispers[senderShort] = { time = now, msg = msg }
+local function FilterIncomingWhispers(self, event, msg, sender, language, channelString,
+    target, flags, zoneID, channelNumber, channelName, unused, lineID, guid)
 
+    if ShouldBlockIncomingMessage(sender, flags, guid) then
+        local senderShort = NormalizeName(sender)
+
+        -- Mark this sender for conversation suppression
+        suppressConversations[senderShort] = GetTime() + 5
+
+        -- Close any UI that might have opened
+        CloseWhisperUI(sender)
+
+        -- Optional auto-reply
         if WhysperConfig.sendIgnoredMessage then
-            if not replyCooldowns[sender] or (now - replyCooldowns[sender] > 10) then
-                replyCooldowns[sender] = now
+            local now = GetTime()
 
-                local customMsg = WhysperConfig.ignoredMessageText or "You are currently being ignored by the user."
-                if customMsg:match("^%s*$") then customMsg = "You are currently being ignored by the user." end
+            if not replyCooldowns[senderShort] or (now - replyCooldowns[senderShort] > 10) then
+                replyCooldowns[senderShort] = now
 
-                -- Mark this sender so we know to hide the outgoing message
+                local customMsg = WhysperConfig.ignoredMessageText
+                if not customMsg or customMsg:match("^%s*$") then
+                    customMsg = "You are currently being ignored by the user."
+                end
+
                 if WhysperConfig.hideAutoReply then
-                    recentAutoReplies[sender] = now
+                    recentAutoReplies[senderShort] = now
                 end
 
                 SendChatMessage(customMsg, "WHISPER", nil, sender)
+
+                -- Cleanup after the send
+                if WhysperConfig.hideAutoReply then
+                    C_Timer.After(0, function()
+                        CloseWhisperUI(sender)
+                    end)
+                end
             end
         end
-        return true
+
+        return true -- Hide the message
     end
+
     return false
 end
 
--- Intercept outgoing whispers to hide our automated reply and prevent the tab from opening
-local function FilterOutgoingWhispers(self, event, msg, sender, language, channelString, target, flags, zoneID, channelNumber, channelName, unused, lineID, guid)
-    if WhysperConfig.hideAutoReply then
-        local now = GetTime()
-        local timeSent = recentAutoReplies[target]
-        -- If we just sent an auto-reply to this target within the last 2 seconds, consume the event
-        if timeSent and (now - timeSent < 2) then
-            return true
-        end
+local function FilterOutgoingWhispers(self, event, msg, target, language, channelString,
+    unused1, flags, zoneID, channelNumber, channelName, unused2, lineID, guid)
+
+    if ShouldBlockOutgoingMessage(target) then
+        local short = NormalizeName(target)
+
+        -- Mark for conversation suppression
+        suppressConversations[short] = GetTime() + 5
+
+        C_Timer.After(0, function()
+            CloseWhisperUI(short)
+        end)
+
+        return true -- Hide our auto-reply message
     end
+
     return false
 end
 
 ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER", FilterIncomingWhispers)
 ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER_INFORM", FilterOutgoingWhispers)
 
-----------------------------------------
--- Addon Options Menu (Settings API)
-----------------------------------------
+-- =========================================================
+-- OPTIONS UI
+-- =========================================================
+
 local optionsFrame = CreateFrame("Frame", "WhysperOptionsFrame", UIParent)
 optionsFrame.name = "Whysper"
 
@@ -235,6 +348,7 @@ title:SetText("Whysper Configuration")
 
 local function CreateCheckbox(label, yOffset, configKey, parentNode)
     local cb = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+
     if parentNode then
         cb:SetPoint("TOPLEFT", parentNode, "BOTTOMLEFT", 0, yOffset)
     else
@@ -256,14 +370,13 @@ local function CreateCheckbox(label, yOffset, configKey, parentNode)
     return cb
 end
 
-local cbFriends = CreateCheckbox("Allow whispers from friends", -20, "allowFriends", nil)
-local cbGuild = CreateCheckbox("Allow whispers from guildies", -10, "allowGuildies", cbFriends)
-local cbParty = CreateCheckbox("Allow whispers from party members", -10, "allowParty", cbGuild)
-local cbRaid = CreateCheckbox("Allow whispers from raid members", -10, "allowRaid", cbParty)
+local cbFriends   = CreateCheckbox("Allow whispers from friends", -20, "allowFriends")
+local cbGuild     = CreateCheckbox("Allow whispers from guildies", -10, "allowGuildies", cbFriends)
+local cbParty     = CreateCheckbox("Allow whispers from party members", -10, "allowParty", cbGuild)
+local cbRaid      = CreateCheckbox("Allow whispers from raid members", -10, "allowRaid", cbParty)
 local cbStrangers = CreateCheckbox("Allow whispers from strangers", -10, "allowStrangers", cbRaid)
-local cbReply = CreateCheckbox("Send ignored message to blocked senders", -30, "sendIgnoredMessage", cbStrangers)
+local cbReply     = CreateCheckbox("Send ignored message to blocked senders", -30, "sendIgnoredMessage", cbStrangers)
 
--- Custom Auto-Reply Message Text Box
 local replyEditBox = CreateFrame("EditBox", nil, optionsFrame, "InputBoxTemplate")
 replyEditBox:SetSize(300, 20)
 replyEditBox:SetPoint("TOPLEFT", cbReply, "BOTTOMLEFT", 15, -20)
@@ -284,36 +397,35 @@ replyEditBox:SetScript("OnTextChanged", function(self, userInput)
     end
 end)
 
--- Checkbox to hide the auto-reply from the user's own chat
-local cbHideReply = CreateCheckbox("Hide auto-reply from my chat window (prevents tab opening)", -15, "hideAutoReply", nil)
+local cbHideReply = CreateCheckbox(
+    "Hide auto-reply from my chat window (prevents tab opening)",
+    -15,
+    "hideAutoReply"
+)
 cbHideReply:SetPoint("TOPLEFT", replyEditBox, "BOTTOMLEFT", -15, -15)
 
--- Visually toggle the EditBox and Hide Checkbox based on the Auto-Reply status
 local function UpdateEditBoxState()
-    if WhysperConfig.sendIgnoredMessage then
-        replyEditBox:Enable()
-        replyEditBox:SetAlpha(1)
-        cbHideReply:Enable()
-        cbHideReply:SetAlpha(1)
-    else
-        replyEditBox:Disable()
-        replyEditBox:SetAlpha(0.5)
-        cbHideReply:Disable()
-        cbHideReply:SetAlpha(0.5)
-    end
+    local enabled = WhysperConfig.sendIgnoredMessage
+
+    replyEditBox:SetEnabled(enabled)
+    replyEditBox:SetAlpha(enabled and 1 or 0.5)
+
+    cbHideReply:SetEnabled(enabled)
+    cbHideReply:SetAlpha(enabled and 1 or 0.5)
 end
 
 cbReply:HookScript("OnShow", UpdateEditBoxState)
 cbReply:HookScript("OnClick", UpdateEditBoxState)
 
--- Register the options frame into the modern WoW Settings menu
 local category = Settings.RegisterCanvasLayoutCategory(optionsFrame, "Whysper")
 Settings.RegisterAddOnCategory(category)
 
-----------------------------------------
--- Slash Commands
-----------------------------------------
+-- =========================================================
+-- SLASH COMMANDS
+-- =========================================================
+
 SLASH_WHYSPER1 = "/why"
+
 SlashCmdList["WHYSPER"] = function(msg)
     local cmd = msg:lower():match("^%s*(%w+)")
 
