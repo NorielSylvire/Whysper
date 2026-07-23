@@ -13,6 +13,8 @@ Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.
 - Stealth Auto-Reply: Blocked users can optionally receive a clean, system-style notice: "You are currently being ignored by the user."
 - Built-in Loop Protection: Features smart internal message throttling to prevent dangerous infinite auto-reply loops if you encounter another player using a similar responder addon.
 - Modern Settings UI: Fully integrated into WoW’s native Options > AddOns canvas layout panel. No clunky, custom configuration frames anchoring to your screen.
+- Block TTS from reading ignored DMs. Complete peace of mind.
+- Customize the message ignored players get when they DM you.
 
 ## ⚙️ How the Priority Order Works
 
