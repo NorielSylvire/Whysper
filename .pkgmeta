@@ -1,4 +1,5 @@
 ignore:
   - .gitignore
   - README.md
+  - CHANGELOG.md
   - .github
