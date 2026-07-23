@@ -2,5 +2,7 @@ ignore:
   - .gitignore
   - README.md
   - .github
+  - CHANGELOG.md
+  - RELEASE_NOTES.md
 
 manual-changelog: RELEASE_NOTES.md
