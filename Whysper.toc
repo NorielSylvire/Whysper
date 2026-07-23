@@ -5,5 +5,6 @@
 ## Version: 1.3
 ## IconTexture: Interface\Icons\Inv_misc_note_03
 ## SavedVariables: WhysperConfig
+## X-Curse-Project-ID: 1617226
 
 core.lua
