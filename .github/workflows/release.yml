@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  create:
     tags:
       - 'v*'
 
@@ -17,7 +18,7 @@ jobs:
           fetch-depth: 0 # Fetches full history so changelog generation works properly
 
       - name: Package and Publish Addon
-        uses: BigWigsMods/packager@v2.5.1
+        uses: BigWigsMods/packager@v2
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
