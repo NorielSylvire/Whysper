@@ -1,8 +1,8 @@
 # Whysper — Intelligent Whisper & Privacy Filter
 
-Tired of gold sellers, random guild invites, and unsolicited messages cluttering your chat frames while you’re trying to focus on a mythic key, raid, or solo run?
+Tired of gold sellers, random guild invites, and unsolicited messages cluttering your chat frames while you're trying to focus on a mythic key, raid, or solo run?
 
-Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.7) that gives you complete control over who can slide into your DMs. Instead of a blunt "block everything" tool, Whysper handles communication via an intelligent Waterfall Priority Filter to ensure you never miss a message that actually matters.
+Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.7) that gives you complete control over who can slide into your DMs. Instead of a blunt "block everything" tool, Whysper[...]
 
 ---
 
@@ -12,7 +12,7 @@ Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.
 - Granular Control: Toggle communication from any of these 5 social groups completely independently. Want to hear from friends and literal strangers, but block players in your guild? Done.
 - Stealth Auto-Reply: Blocked users can optionally receive a clean, system-style notice: "You are currently being ignored by the user."
 - Built-in Loop Protection: Features smart internal message throttling to prevent dangerous infinite auto-reply loops if you encounter another player using a similar responder addon.
-- Modern Settings UI: Fully integrated into WoW’s native Options > AddOns canvas layout panel. No clunky, custom configuration frames anchoring to your screen.
+- Modern Settings UI: Fully integrated into WoW's native Options > AddOns canvas layout panel. No clunky, custom configuration frames anchoring to your screen.
 - Block TTS from reading ignored DMs. Complete peace of mind.
 - Customize the message ignored players get when they DM you.
 - WIM Compatibility: You can use this addon alongside WIM!
@@ -32,3 +32,7 @@ Because players often occupy multiple social circles, Whysper always grants the 
 - /why stranger — Instantly toggles whispers from strangers on/off.
 - /why friend / /why guild / /why party / /why raid — Swiftly flips specific group access.
 - /why reply — Toggles the automated rejection notification message.
+
+## 🐛 Found a Bug?
+
+Something not working as expected? No worries — head over to the [Issues page](https://github.com/NorielSylvire/Whysper/issues) and let us know! Just click **"New Issue"**, describe what happened, and we'll look into it. You don't need to know anything about programming to report a bug — plain English is perfectly fine!
