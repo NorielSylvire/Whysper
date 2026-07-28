@@ -2,7 +2,7 @@
 -- Updated to fully suppress blocked whispers, prevent TTS from triggering,
 -- hide outgoing auto-replies, and prevent whisper tabs/conversations from opening.
 
-local addonName, _ = ...
+local addonName, ns = ...
 
 WhysperConfig = WhysperConfig or {}
 
@@ -11,6 +11,9 @@ local guildMembers = {}
 local replyCooldowns = {}
 local recentAutoReplies = {}
 local suppressConversations = {}
+
+-- Share auto-reply tracking with the WIM compatibility module
+ns.recentAutoReplies = recentAutoReplies
 
 local function NormalizeName(name)
     return name and (string.match(name, "(.*)%-") or name) or nil
