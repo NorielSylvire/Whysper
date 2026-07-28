@@ -15,6 +15,8 @@ Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.
 - Modern Settings UI: Fully integrated into WoW’s native Options > AddOns canvas layout panel. No clunky, custom configuration frames anchoring to your screen.
 - Block TTS from reading ignored DMs. Complete peace of mind.
 - Customize the message ignored players get when they DM you.
+- WIM Compatibility: You can use this addon alongside WIM!
+- Realm blacklist: Ignore only strangers from specific realms.
 
 ## ⚙️ How the Priority Order Works
 
