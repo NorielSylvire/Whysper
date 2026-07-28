@@ -1,7 +1,7 @@
 # Whysper changelog
 
 ## v1.5.1
-- Fixed a bug where you would send an additional "You are being ignored" message every time you relaod.
+- Fixed a bug where you would send an additional "You are being ignored" message every time you /reload.
 
 ## v1.5
 - Added a realm blacklist.
