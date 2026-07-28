@@ -8,9 +8,10 @@ WhysperConfig = WhysperConfig or {}
 
 local frame = CreateFrame("Frame")
 local guildMembers = {}
-local replyCooldowns = {}
 local recentAutoReplies = {}
 local suppressConversations = {}
+local repliedToMessages = {}
+local loginTime = nil
 
 -- Share auto-reply tracking with the WIM compatibility module
 ns.recentAutoReplies = recentAutoReplies
@@ -260,6 +261,9 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         end
 
     elseif event == "PLAYER_LOGIN" then
+        -- Record login time to ignore cached whisper events
+        loginTime = GetTime()
+
         if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then
             C_GuildInfo.GuildRoster()
         end
@@ -291,12 +295,12 @@ local function FilterIncomingWhispers(self, event, msg, sender, language, channe
         -- Close any UI that might have opened
         CloseWhisperUI(sender)
 
-        -- Optional auto-reply
-        if WhysperConfig.sendIgnoredMessage then
+        -- Optional auto-reply (only once per unique message)
+        -- Skip if we just logged in (to avoid replying to cached/replayed events)
+        if WhysperConfig.sendIgnoredMessage and lineID then
             local now = GetTime()
-
-            if not replyCooldowns[senderShort] or (now - replyCooldowns[senderShort] > 10) then
-                replyCooldowns[senderShort] = now
+            if not repliedToMessages[lineID] and loginTime and (now - loginTime) > 2 then
+                repliedToMessages[lineID] = true
 
                 local customMsg = WhysperConfig.ignoredMessageText
                 if not customMsg or customMsg:match("^%s*$") then

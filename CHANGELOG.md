@@ -1,8 +1,11 @@
 # Whysper changelog
 
+## v1.5.1
+- Fixed a bug where you would send an additional "You are being ignored" message every time you relaod.
+
 ## v1.5
-- Added a realm blacklist
-- From v1.4: Added WIM compatibility
+- Added a realm blacklist.
+- From v1.4: Added WIM compatibility.
 
 ## v1.3
 - Added an option to hide your own automated ignored message.
