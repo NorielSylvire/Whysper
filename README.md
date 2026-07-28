@@ -2,7 +2,7 @@
 
 Tired of gold sellers, random guild invites, and unsolicited messages cluttering your chat frames while you're trying to focus on a mythic key, raid, or solo run?
 
-Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.7) that gives you complete control over who can slide into your DMs. Instead of a blunt "block everything" tool, Whysper[...]
+Whysper is a lightweight, zero-bloat privacy addon built for WoW Midnight (12.0.7) that gives you complete control over who can slide into your DMs. Instead of a blunt "block everything" tool, Whysper handles communication via an intelligent Waterfall Priority Filter to ensure you never miss a message that actually matters.
 
 ---
 
