@@ -6,6 +6,7 @@
 ## IconTexture: Interface\Icons\Inv_misc_note_03
 ## SavedVariables: WhysperConfig
 ## X-Curse-Project-ID: 1617226
+## X-Wago-ID: qGYZlgNg
 ## OptionalDeps: WIM
 
 RealmBlacklist.lua
