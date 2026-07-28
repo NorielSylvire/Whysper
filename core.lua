@@ -78,6 +78,13 @@ local function ShouldBlockWhisper(sender, guid)
     elseif category == "party" then
         return not WhysperConfig.allowParty
     elseif category == "stranger" then
+        -- Check realm blacklist for strangers
+        if ns.IsRealmBlacklisted and ns.GetRealmFromName then
+            local realm = ns.GetRealmFromName(sender)
+            if realm and ns.IsRealmBlacklisted(realm) then
+                return true
+            end
+        end
         return not WhysperConfig.allowStrangers
     end
 
@@ -243,6 +250,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             sendIgnoredMessage = false,
             ignoredMessageText = "You are currently being ignored by the user.",
             hideAutoReply = false,
+            realmBlacklist = {},
         }
 
         for k, v in pairs(defaults) do
@@ -345,12 +353,37 @@ ChatFrame_AddMessageEventFilter("CHAT_MSG_WHISPER_INFORM", FilterOutgoingWhisper
 local optionsFrame = CreateFrame("Frame", "WhysperOptionsFrame", UIParent)
 optionsFrame.name = "Whysper"
 
-local title = optionsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+-- Create a scroll frame to contain all options
+local scrollFrame = CreateFrame("ScrollFrame", "WhysperOptionsScrollFrame", optionsFrame, "UIPanelScrollFrameTemplate")
+scrollFrame:SetPoint("TOPLEFT", 0, 0)
+scrollFrame:SetPoint("BOTTOMRIGHT", -26, 0)
+
+-- Create the scroll child that will hold all the content
+local scrollChild = CreateFrame("Frame", "WhysperOptionsScrollChild", scrollFrame)
+scrollChild:SetSize(550, 600) -- Width and initial height (height will be adjusted)
+scrollFrame:SetScrollChild(scrollChild)
+
+-- Enable mouse wheel scrolling
+scrollFrame:EnableMouseWheel(true)
+scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+    local scrollBar = _G["WhysperOptionsScrollFrameScrollBar"]
+    local current = scrollBar:GetValue()
+    local minVal, maxVal = scrollBar:GetMinMaxValues()
+    local step = 40
+    
+    if delta > 0 then
+        scrollBar:SetValue(math.max(current - step, minVal))
+    else
+        scrollBar:SetValue(math.min(current + step, maxVal))
+    end
+end)
+
+local title = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
 title:SetPoint("TOPLEFT", 16, -16)
 title:SetText("Whysper Configuration")
 
 local function CreateCheckbox(label, yOffset, configKey, parentNode)
-    local cb = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+    local cb = CreateFrame("CheckButton", nil, scrollChild, "UICheckButtonTemplate")
 
     if parentNode then
         cb:SetPoint("TOPLEFT", parentNode, "BOTTOMLEFT", 0, yOffset)
@@ -380,7 +413,7 @@ local cbRaid      = CreateCheckbox("Allow whispers from raid members", -10, "all
 local cbStrangers = CreateCheckbox("Allow whispers from strangers", -10, "allowStrangers", cbRaid)
 local cbReply     = CreateCheckbox("Send ignored message to blocked senders", -30, "sendIgnoredMessage", cbStrangers)
 
-local replyEditBox = CreateFrame("EditBox", nil, optionsFrame, "InputBoxTemplate")
+local replyEditBox = CreateFrame("EditBox", nil, scrollChild, "InputBoxTemplate")
 replyEditBox:SetSize(300, 20)
 replyEditBox:SetPoint("TOPLEFT", cbReply, "BOTTOMLEFT", 15, -20)
 replyEditBox:SetAutoFocus(false)
@@ -420,6 +453,11 @@ end
 cbReply:HookScript("OnShow", UpdateEditBoxState)
 cbReply:HookScript("OnClick", UpdateEditBoxState)
 
+-- Add realm blacklist UI (pass scrollChild instead of optionsFrame)
+if ns.CreateRealmBlacklistUI then
+    ns.CreateRealmBlacklistUI(scrollChild, cbHideReply)
+end
+
 local category = Settings.RegisterCanvasLayoutCategory(optionsFrame, "Whysper")
 Settings.RegisterAddOnCategory(category)
 
@@ -430,7 +468,8 @@ Settings.RegisterAddOnCategory(category)
 SLASH_WHYSPER1 = "/why"
 
 SlashCmdList["WHYSPER"] = function(msg)
-    local cmd = msg:lower():match("^%s*(%w+)")
+    local cmd, args = msg:match("^%s*(%w+)%s*(.*)$")
+    cmd = cmd and cmd:lower() or ""
 
     if cmd == "menu" or cmd == "config" or cmd == "settings" then
         Settings.OpenToCategory(category:GetID())
@@ -456,6 +495,14 @@ SlashCmdList["WHYSPER"] = function(msg)
     elseif cmd == "hide" then
         WhysperConfig.hideAutoReply = not WhysperConfig.hideAutoReply
         print("Whysper - Hide Auto-Reply: " .. (WhysperConfig.hideAutoReply and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+    elseif cmd == "realm" then
+        if ns.HandleRealmCommand and ns.HandleRealmCommand(args) then
+            return
+        end
+        -- If no valid subcommand, show realm help
+        if ns.PrintRealmHelp then
+            ns.PrintRealmHelp()
+        end
     else
         print("|cffffff00Whysper Commands:|r")
         print("/why menu     - Open the Interface Settings panel")
@@ -466,5 +513,6 @@ SlashCmdList["WHYSPER"] = function(msg)
         print("/why raid     - Toggle raid whispers")
         print("/why reply    - Toggle auto-reply to blocked users")
         print("/why hide     - Toggle hiding your automated replies")
+        print("/why realm    - Manage realm blacklist (add/remove/list/clear)")
     end
 end
