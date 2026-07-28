@@ -1,5 +1,9 @@
 # Whysper changelog
 
+## v1.5
+- Added a realm blacklist
+- From v1.4: Added WIM compatibility
+
 ## v1.3
 - Added an option to hide your own automated ignored message.
 - Fixed the bug where TTS would read blocked DMs aloud.
