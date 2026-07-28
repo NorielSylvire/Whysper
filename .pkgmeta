@@ -4,5 +4,6 @@ ignore:
   - .github
   - CHANGELOG.md
   - RELEASE_NOTES.md
+  - TODO.txt
 
 manual-changelog: RELEASE_NOTES.md
