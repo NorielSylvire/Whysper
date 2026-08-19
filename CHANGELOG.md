@@ -1,5 +1,10 @@
 # Whysper changelog
 
+## v1.5.2
+- Fixed a critical bug where hooking TextToSpeechFrame_MessageEventHandler caused taint issues with WoW 12.0's new Secret Values system. This was causing raid/party chat messages to not appear for some users when in combat inside instances (dungeons/raids). The TTS blocking mechanism now uses a different approach that avoids tainting Blizzard's execution path.
+- Improved github workflow to publish new versions automatically.
+- Extended changelog is not visible in Wago and CurseForge.
+
 ## v1.5.1
 - Fixed a bug where you would send an additional "You are being ignored" message every time you /reload.
 
