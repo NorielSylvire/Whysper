@@ -21,10 +21,15 @@ jobs:
           awk '/^## v[0-9]/{if(found) exit; found=1} found' CHANGELOG.md > RELEASE_NOTES.md
 
       - name: Package and Publish Addon
+        id: packager
         uses: BigWigsMods/packager@v2.5.1
-        with:
-          args: -r RELEASE_NOTES.md
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
-          GITHUB_OAUTH: ${{ github.token }}
+          # Don't upload to GitHub here, we'll do it separately with RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: ${{ steps.packager.outputs.archive_path }}
