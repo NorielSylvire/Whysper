@@ -5,6 +5,4 @@ ignore:
   - RELEASE_NOTES.md
   - TODO.txt
 
-manual-changelog: RELEASE_NOTES.md
-manual-changelog-curseforge: CHANGELOG.md
-manual-changelog-wago: CHANGELOG.md
+manual-changelog: CHANGELOG.md
