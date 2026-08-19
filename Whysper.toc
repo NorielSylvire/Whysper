@@ -1,4 +1,4 @@
-## Interface: 120007
+## Interface: 120107
 ## Title: Whysper
 ## Notes: Configurable whisper filter for friends, guildies, party, raid, and strangers.
 ## Author: Noriel Sylvire
