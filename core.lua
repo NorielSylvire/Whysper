@@ -161,54 +161,65 @@ local function InstallTTSHook()
     if WhysperTTSHookInstalled then return end
     WhysperTTSHookInstalled = true
 
-    -- The key insight: TTS for chat messages is NOT triggered by TextToSpeechFrame's
-    -- OnEvent handler. Instead, ChatFrameMixin:MessageEventHandler calls
-    -- TextToSpeechFrame_MessageEventHandler BEFORE message filters run.
-    -- We must hook that global function to intercept TTS.
+    -- Block TTS for filtered whispers.
+    --
+    -- We CANNOT replace TextToSpeechFrame_MessageEventHandler because in WoW 12.0+,
+    -- doing so taints the execution path. When addon restrictions are active
+    -- (e.g., in combat inside instances), chat message arguments become "secret
+    -- values" that tainted code cannot operate on. This causes errors in Blizzard's
+    -- chat code for ALL chat types, not just whispers.
+    --
+    -- Instead, we use a two-part approach:
+    -- 1. Register for whisper events to detect blocked whispers and set a flag
+    -- 2. Listen for VOICE_CHAT_TTS_PLAYBACK_STARTED and immediately stop TTS
+    --    if the flag is set
+    --
+    -- This avoids replacing any functions in Blizzard's call chain while still
+    -- preventing blocked whispers from being read aloud. The TTS may start
+    -- momentarily before being stopped, but this is imperceptible in practice.
 
-    if TextToSpeechFrame_MessageEventHandler then
-        local originalTTSHandler = TextToSpeechFrame_MessageEventHandler
-        TextToSpeechFrame_MessageEventHandler = function(frame, event, ...)
-            if event == "CHAT_MSG_WHISPER" then
-                local _, sender, _, _, _, flags, _, _, _, _, _, guid = ...
-                if ShouldBlockIncomingMessage(sender, flags, guid) then
-                    return -- Block TTS for this message
-                end
-            elseif event == "CHAT_MSG_WHISPER_INFORM" then
-                local _, target = ...
-                if ShouldBlockOutgoingMessage(target) then
-                    return -- Block TTS for our auto-reply
-                end
+    local pendingTTSBlock = false
+    local blockUntil = 0
+
+    -- Create a frame for our event handling
+    local ttsBlockFrame = CreateFrame("Frame")
+
+    -- Register for whisper events to detect blocked whispers
+    ttsBlockFrame:RegisterEvent("CHAT_MSG_WHISPER")
+    ttsBlockFrame:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
+    -- Register for TTS playback event to stop blocked TTS
+    ttsBlockFrame:RegisterEvent("VOICE_CHAT_TTS_PLAYBACK_STARTED")
+
+    ttsBlockFrame:SetScript("OnEvent", function(self, event, ...)
+        if event == "CHAT_MSG_WHISPER" then
+            local msg, sender, _, _, _, flags, _, _, _, _, _, guid = ...
+            if ShouldBlockIncomingMessage(sender, flags, guid) then
+                pendingTTSBlock = true
+                blockUntil = GetTime() + 0.5 -- Block for a short window
             end
-            return originalTTSHandler(frame, event, ...)
+        elseif event == "CHAT_MSG_WHISPER_INFORM" then
+            local msg, target = ...
+            if ShouldBlockOutgoingMessage(target) then
+                pendingTTSBlock = true
+                blockUntil = GetTime() + 0.5
+            end
+        elseif event == "VOICE_CHAT_TTS_PLAYBACK_STARTED" then
+            -- If we have a pending TTS block and it hasn't expired, stop the TTS
+            if pendingTTSBlock and GetTime() < blockUntil then
+                pendingTTSBlock = false
+                C_VoiceChat.StopSpeakingText()
+            end
         end
-    end
+    end)
 end
 
 local function InstallFloatingChatFrameManagerHook()
-    if WhysperFCFManagerHookInstalled then return end
-    WhysperFCFManagerHookInstalled = true
-
-    -- Hook the FloatingChatFrameManager to prevent whisper tabs from opening
-    if FloatingChatFrameManager then
-        local originalOnEvent = FloatingChatFrameManager:GetScript("OnEvent")
-        if originalOnEvent then
-            FloatingChatFrameManager:SetScript("OnEvent", function(self, event, ...)
-                if event == "CHAT_MSG_WHISPER" then
-                    local _, sender, _, _, _, flags, _, _, _, _, _, guid = ...
-                    if ShouldBlockIncomingMessage(sender, flags, guid) then
-                        return -- Don't open a whisper tab
-                    end
-                elseif event == "CHAT_MSG_WHISPER_INFORM" then
-                    local _, target = ...
-                    if ShouldBlockOutgoingMessage(target) then
-                        return -- Don't open a whisper tab for our auto-reply
-                    end
-                end
-                return originalOnEvent(self, event, ...)
-            end)
-        end
-    end
+    -- DISABLED: This hook was causing compatibility issues with other addons
+    -- (e.g., Leatrix_Plus, DialogueUI) that also modify chat frame handling.
+    -- The ChatFrame_AddMessageEventFilter already hides whispers from chat,
+    -- and InstallTemporaryWindowHook closes any whisper tabs that might open.
+    -- This hook was redundant and its removal improves compatibility.
+    return
 end
 
 local function InstallTemporaryWindowHook()
